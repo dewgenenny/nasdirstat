@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 from collections.abc import AsyncIterator
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -43,8 +43,9 @@ _NOAUTH = os.environ.get("NOAUTH", "false").lower() in ("true", "1", "yes")
 _SESSION_HOURS = max(1, int(os.environ.get("SESSION_HOURS", "24")))
 
 _VALID_INTERVALS = {0, 1, 6, 12, 24, 48, 168}
-# I/O-bound scan workers: more threads than cores since all time is in stat() syscalls
-_SCAN_WORKERS = min(32, (os.cpu_count() or 4) * 4)
+# One thread per top-level directory (≈ one per Unraid share / physical drive).
+# Capped at 16 — more than enough for any NAS, and avoids thrashing a shared spindle.
+_SCAN_WORKERS = min(16, os.cpu_count() or 4)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -130,98 +131,129 @@ def save_cache(tree: dict[str, Any]) -> None:
 
 def _scan_sync(root: str, prune: set[str], max_files: int) -> dict[str, Any]:
     """
-    Parallel scanner using os.scandir() + a thread pool.
+    Share-level parallel scanner.
 
-    Phase 1 — parallel BFS: each worker scans exactly one directory and returns
-    immediately; newly discovered subdirs are submitted back to the pool by the
-    coordinating loop (no thread ever blocks waiting for child results, so there
-    is no deadlock risk regardless of tree depth).
+    Each top-level subdirectory of root is scanned by a dedicated thread,
+    sequentially within its own subtree.  On Unraid each top-level entry
+    (Movies, Music, TV, etc.) typically lives on a different physical drive,
+    so threads do genuinely parallel I/O with no head-seeking contention.
 
-    Phase 2 — sequential tree assembly: once all directories are scanned the
-    results dict is walked recursively to build the nested tree.  The stat()
-    syscall per file is the dominant cost on spinning NAS drives; parallelising
-    it across _SCAN_WORKERS threads gives roughly linear speedup up to the
-    number of independent spindles.
+    Within each thread the walk is the original bottom-up recursive approach:
+    the completed subtree is returned as a finished dict, so peak memory is
+    proportional to the final tree size, not the raw file count across all dirs
+    simultaneously.
     """
     nodes_seen = 0
     nodes_lock = threading.Lock()
-
-    def _scan_dir(path: str) -> tuple[list[str], list[tuple[str, str, int]]]:
-        nonlocal nodes_seen
-        subdirs: list[str] = []
-        files: list[tuple[str, str, int]] = []
-        try:
-            with os.scandir(path) as it:
-                for entry in it:
-                    if entry.path in prune or entry.is_symlink():
-                        continue
-                    with nodes_lock:
-                        nodes_seen += 1
-                        if nodes_seen % 50_000 == 0:
-                            _scanner_state["progress"] = f"Scanned {nodes_seen:,} items…"
-                            log.info(_scanner_state["progress"])
-                    if entry.is_dir(follow_symlinks=False):
-                        subdirs.append(entry.path)
-                    elif entry.is_file(follow_symlinks=False):
-                        try:
-                            files.append((entry.name, entry.path,
-                                          entry.stat(follow_symlinks=False).st_size))
-                        except OSError:
-                            pass
-        except PermissionError:
-            pass
-        except OSError as exc:
-            log.warning("Scan error at %s: %s", path, exc)
-        return subdirs, files
-
-    log.info("Scan starting: %s (prune: %s, workers: %d)", root, prune, _SCAN_WORKERS)
-
-    # ── Phase 1: parallel BFS ────────────────────────────────────────────────
-    all_dirs: dict[str, tuple[list[str], list[tuple[str, str, int]]]] = {}
-    with ThreadPoolExecutor(max_workers=_SCAN_WORKERS) as pool:
-        future_to_path: dict[Any, str] = {pool.submit(_scan_dir, root): root}
-        while future_to_path:
-            done, _ = wait(future_to_path.keys(), return_when=FIRST_COMPLETED)
-            for fut in done:
-                path = future_to_path.pop(fut)
-                subdirs, files = fut.result()
-                all_dirs[path] = (subdirs, files)
-                for sub in subdirs:
-                    if sub not in all_dirs:
-                        future_to_path[pool.submit(_scan_dir, sub)] = sub
-
-    # ── Phase 2: assemble tree (sequential, may recurse deeply) ─────────────
     old_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(10_000)
-    try:
-        def build(path: str) -> dict[str, Any]:
-            subdirs, files = all_dirs.get(path, ([], []))
-            children: list[dict[str, Any]] = []
-            size = 0
 
-            for sub in subdirs:
-                child = build(sub)
-                size += child["size"]
-                children.append(child)
+    try:
+        def walk(path: str) -> dict[str, Any]:
+            nonlocal nodes_seen
+            node: dict[str, Any] = {
+                "name": os.path.basename(path) or path,
+                "path": path,
+                "size": 0,
+                "children": [],
+            }
+            dirs: list[str] = []
+            files: list[tuple[str, str, int]] = []
+            try:
+                with os.scandir(path) as it:
+                    for entry in it:
+                        if entry.path in prune or entry.is_symlink():
+                            continue
+                        with nodes_lock:
+                            nodes_seen += 1
+                            if nodes_seen % 50_000 == 0:
+                                _scanner_state["progress"] = f"Scanned {nodes_seen:,} items…"
+                                log.info(_scanner_state["progress"])
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            try:
+                                size = entry.stat(follow_symlinks=False).st_size
+                                files.append((entry.name, entry.path, size))
+                            except OSError:
+                                pass
+            except PermissionError:
+                pass
+            except OSError as exc:
+                log.warning("Scan error at %s: %s", path, exc)
+
+            for d in dirs:
+                child = walk(d)
+                node["size"] += child["size"]
+                node["children"].append(child)
 
             files.sort(key=lambda f: f[2], reverse=True)
             kept, rest = files[:max_files], files[max_files:]
-            for fname, fpath, fsize in kept:
-                size += fsize
-                children.append({"name": fname, "path": fpath, "size": fsize})
+            for name, fpath, size in kept:
+                node["size"] += size
+                node["children"].append({"name": name, "path": fpath, "size": size})
             if rest:
                 other_size = sum(f[2] for f in rest)
-                size += other_size
-                children.append({
+                node["size"] += other_size
+                node["children"].append({
                     "name": f"[{len(rest):,} other files]",
                     "path": path + "/[other]",
                     "size": other_size,
                 })
+            return node
 
-            return {"name": os.path.basename(path) or path,
-                    "path": path, "size": size, "children": children}
+        # Enumerate root's immediate children
+        top_dirs: list[str] = []
+        top_files: list[tuple[str, str, int]] = []
+        try:
+            with os.scandir(root) as it:
+                for entry in it:
+                    if entry.path in prune or entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        top_dirs.append(entry.path)
+                    elif entry.is_file(follow_symlinks=False):
+                        try:
+                            top_files.append((entry.name, entry.path,
+                                              entry.stat(follow_symlinks=False).st_size))
+                        except OSError:
+                            pass
+        except (PermissionError, OSError) as exc:
+            log.warning("Scan error at root %s: %s", root, exc)
 
-        return build(root)
+        log.info("Scan starting: %s  top-level dirs: %d  workers: %d",
+                 root, len(top_dirs), min(_SCAN_WORKERS, len(top_dirs) or 1))
+
+        # Each top-level dir gets its own thread (one thread ≈ one share ≈ one drive)
+        workers = min(_SCAN_WORKERS, len(top_dirs)) if top_dirs else 1
+        children: list[dict[str, Any]] = []
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for child in as_completed(pool.submit(walk, d) for d in top_dirs):
+                children.append(child.result())
+
+        # Assemble root node
+        root_size = sum(c["size"] for c in children)
+        top_files.sort(key=lambda f: f[2], reverse=True)
+        kept, rest = top_files[:max_files], top_files[max_files:]
+        for name, fpath, size in kept:
+            root_size += size
+            children.append({"name": name, "path": fpath, "size": size})
+        if rest:
+            other_size = sum(f[2] for f in rest)
+            root_size += other_size
+            children.append({
+                "name": f"[{len(rest):,} other files]",
+                "path": root + "/[other]",
+                "size": other_size,
+            })
+
+        return {
+            "name": os.path.basename(root) or root,
+            "path": root,
+            "size": root_size,
+            "children": children,
+        }
+
     finally:
         sys.setrecursionlimit(old_limit)
 
