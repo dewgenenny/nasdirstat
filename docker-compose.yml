@@ -1,0 +1,18 @@
+services:
+  nasdirstat:
+    build: .
+    container_name: nasdirstat
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - /home/tom:/data:ro
+      - ./index:/index
+    environment:
+      - DATA_PATH=/data
+      - PRUNE_PATHS=/data/appdata /data/system /data/domains /data/isos
+      - MAX_FILES_PER_DIR=200
+      # AUTH_USER=admin
+      # AUTH_PASS=your-strong-password-here
+      - NOAUTH=true
+      # SESSION_HOURS=24

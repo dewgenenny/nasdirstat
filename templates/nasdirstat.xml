@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>nasdirstat</Name>
+  <Repository>ghcr.io/dewgenenny/nasdirstat:latest</Repository>
+  <Registry>https://github.com/dewgenenny/nasdirstat/pkgs/container/nasdirstat</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/dewgenenny/nasdirstat/issues</Support>
+  <Project>https://github.com/dewgenenny/nasdirstat</Project>
+  <Overview>WinDirStat-style disk usage treemap for your NAS. Scans a mapped /data directory using native Python and displays an interactive D3 treemap. Supports scheduled and on-demand rescans, optional authentication, and configurable path pruning.</Overview>
+  <Category>Tools: Status:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/dewgenenny/nasdirstat/main/templates/nasdirstat.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/dewgenenny/nasdirstat/main/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Description>WinDirStat-style disk usage treemap for your NAS. Scans a mapped /data directory using native Python and displays an interactive D3 treemap. Supports scheduled and on-demand rescans, optional authentication, and configurable path pruning.</Description>
+  <Networking>
+    <Mode>bridge</Mode>
+    <Publish>
+      <Port>
+        <HostPort>8000</HostPort>
+        <ContainerPort>8000</ContainerPort>
+        <Protocol>tcp</Protocol>
+      </Port>
+    </Publish>
+  </Networking>
+  <Data>
+    <Volume>
+      <HostDir>/mnt/user</HostDir>
+      <ContainerDir>/data</ContainerDir>
+      <Mode>ro</Mode>
+    </Volume>
+    <Volume>
+      <HostDir>/mnt/user/appdata/nasdirstat</HostDir>
+      <ContainerDir>/index</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+  </Data>
+  <Environment>
+    <Variable>
+      <Value>/data</Value>
+      <Name>DATA_PATH</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>/data/appdata /data/system /data/domains /data/isos</Value>
+      <Name>PRUNE_PATHS</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>200</Value>
+      <Name>MAX_FILES_PER_DIR</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value></Value>
+      <Name>AUTH_USER</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value></Value>
+      <Name>AUTH_PASS</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>false</Value>
+      <Name>NOAUTH</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>24</Value>
+      <Name>SESSION_HOURS</Name>
+      <Mode/>
+    </Variable>
+  </Environment>
+  <Labels/>
+  <Config Name="WebUI Port" Target="8000" Default="8000" Mode="tcp" Description="Port for the web interface." Type="Port" Display="always" Required="true" Mask="false">8000</Config>
+  <Config Name="Data Path" Target="/data" Default="/mnt/user" Mode="ro" Description="The directory to scan. Mount read-only." Type="Path" Display="always" Required="true" Mask="false">/mnt/user</Config>
+  <Config Name="Index/Cache Path" Target="/index" Default="/mnt/user/appdata/nasdirstat" Mode="rw" Description="Persistent storage for scan cache and settings." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nasdirstat</Config>
+  <Config Name="DATA_PATH" Target="DATA_PATH" Default="/data" Mode="" Description="Container path of the data root (matches the Data Path volume target)." Type="Variable" Display="advanced" Required="false" Mask="false">/data</Config>
+  <Config Name="PRUNE_PATHS" Target="PRUNE_PATHS" Default="/data/appdata /data/system /data/domains /data/isos" Mode="" Description="Space-separated paths to exclude from scanning." Type="Variable" Display="always" Required="false" Mask="false">/data/appdata /data/system /data/domains /data/isos</Config>
+  <Config Name="MAX_FILES_PER_DIR" Target="MAX_FILES_PER_DIR" Default="200" Mode="" Description="Max individual files to track per directory (largest by size). The rest are aggregated." Type="Variable" Display="advanced" Required="false" Mask="false">200</Config>
+  <Config Name="AUTH_USER" Target="AUTH_USER" Default="" Mode="" Description="Username for web login. Leave blank to require NOAUTH=true." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="AUTH_PASS" Target="AUTH_PASS" Default="" Mode="" Description="Password for web login." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="NOAUTH" Target="NOAUTH" Default="false" Mode="" Description="Set to true to disable authentication (not recommended for external access)." Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+</Container>

@@ -1,0 +1,33 @@
+services:
+  nasdirstat:
+    build: .
+    container_name: nasdirstat-dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${DEV_DATA_PATH:-/tmp/nasdirstat-testdata}:/data:ro
+      - nasdirstat-index:/index
+    environment:
+      - DATA_PATH=/data
+      - PRUNE_PATHS=
+      - MAX_FILES_PER_DIR=200
+      - NOAUTH=true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/status')"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    depends_on:
+      nasdirstat:
+        condition: service_healthy
+    environment:
+      - TEST_URL=http://nasdirstat:8000
+    command: pytest -v tests/
+
+volumes:
+  nasdirstat-index:
