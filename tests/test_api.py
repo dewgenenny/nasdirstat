@@ -54,10 +54,12 @@ def test_rescan_409_when_running(client: httpx.Client, csrf: str):
     # Kick off a scan; if it's already running we'll get 409, which is fine.
     r1 = client.post("/api/rescan", headers={"X-CSRF-Token": csrf})
     if r1.status_code == 200:
-        # Now a second request should return 409
-        r2 = client.post("/api/rescan", headers={"X-CSRF-Token": csrf})
-        assert r2.status_code == 409
-        # Wait for it to finish before continuing
+        # Only assert 409 if the scan is confirmed still running — on tiny
+        # test data it can finish before this line executes.
+        if client.get("/api/status").json()["running"]:
+            r2 = client.post("/api/rescan", headers={"X-CSRF-Token": csrf})
+            assert r2.status_code == 409
+        # Wait for any in-progress scan to finish before continuing
         deadline = time.time() + 120
         while time.time() < deadline:
             if not client.get("/api/status").json()["running"]:

@@ -33,4 +33,4 @@ def csrf(client: httpx.Client) -> str:
     """Return the CSRF token from /api/status (works when NOAUTH=true)."""
     r = client.get("/api/status")
     assert r.status_code == 200, f"Status check failed: {r.text}"
-    return r.json().get("csrf", "noauth")
+    return r.json().get("csrf") or "noauth"

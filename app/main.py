@@ -422,7 +422,7 @@ async def api_status(request: Request):
         "has_data": _cached_tree is not None,
         "interval_hours": settings.get("interval_hours", 24),
         "data_root": _DATA_ROOT,
-        "csrf": sess.get("csrf") if not _NOAUTH else None,
+        "csrf": sess.get("csrf"),
     }
 
 
