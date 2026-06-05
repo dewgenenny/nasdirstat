@@ -862,20 +862,11 @@ function updateBreadcrumb(path, totalSize) {
 }
 
 // ── Load & render ─────────────────────────────────────────────────────────────
-function calcDepth() {
-  const c = document.getElementById('treemap-container');
-  const area = (c.clientWidth || window.innerWidth) * (c.clientHeight || window.innerHeight);
-  if (area > 3_000_000) return 5;
-  if (area > 800_000)   return 4;
-  return 3;
-}
-
 async function loadAndRender(path, push = false) {
   if (push && currentPath && path !== currentPath) pathStack.push(currentPath);
   showOverlay('', 'loading…', '', true);
   try {
-    const depth = calcDepth();
-    const r = await fetch(`/api/data?path=${encodeURIComponent(path)}&depth=${depth}`);
+    const r = await fetch(`/api/data?path=${encodeURIComponent(path)}&depth=5`);
     if (r.status === 401) { location.href = '/api/login'; return; }
     if (!r.ok) {
       const e = await r.json().catch(() => ({ detail: r.statusText }));
@@ -961,7 +952,7 @@ function drawTreemap(data) {
   const w = d => Math.max(0, d.x1 - d.x0);
   const h = d => Math.max(0, d.y1 - d.y0);
 
-  const nodes = root.descendants().filter(d => d.depth > 0 && w(d) > 2 && h(d) > 2);
+  const nodes = root.descendants().filter(d => d.depth > 0 && w(d) > 4 && h(d) > 4);
 
   const cell = svg.selectAll('g.tm-cell')
     .data(nodes, d => d.data.path)
