@@ -6,7 +6,7 @@ services:
     ports:
       - "8001:8000"
     volumes:
-      - /home/tom:/data:ro
+      - /mnt/user:/data:ro
       - ./index:/index
     environment:
       - DATA_PATH=/data
