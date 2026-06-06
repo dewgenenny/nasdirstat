@@ -183,6 +183,7 @@ def _scan_sync(root: str, prune: set[str], max_files: int) -> None:
     renamed over the previous one so readers always see a consistent snapshot.
     """
     nodes_seen = 0
+    visited_dirs: set[tuple[int, int]] = set()  # (st_dev, st_ino) — detect bind-mount loops
     old_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(10_000)
 
@@ -213,6 +214,19 @@ def _scan_sync(root: str, prune: set[str], max_files: int) -> None:
             name = os.path.basename(path) or path
             dirs: list[str] = []
             files: list[tuple[str, str, int]] = []
+
+            # Detect cycles caused by bind mounts or hard-linked directories.
+            # A bind mount exposes the same inode at a second path — its (dev, ino)
+            # pair will already be in visited_dirs, so we stop before recursing.
+            try:
+                st = os.stat(path, follow_symlinks=False)
+                inode_key = (st.st_dev, st.st_ino)
+                if inode_key in visited_dirs:
+                    log.warning("Skipping already-visited inode at %s (bind mount?)", path)
+                    return 0
+                visited_dirs.add(inode_key)
+            except OSError:
+                return 0
 
             try:
                 with os.scandir(path) as it:
