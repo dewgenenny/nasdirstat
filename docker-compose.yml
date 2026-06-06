@@ -10,7 +10,7 @@ services:
       - ./index:/index
     environment:
       - DATA_PATH=/data
-      - PRUNE_PATHS=/data/appdata /data/system /data/domains /data/isos
+      - PRUNE_PATHS=/data/appdata /data/system /data/domains /data/isos /data/docker
       - MAX_FILES_PER_DIR=200
       # AUTH_USER=admin
       # AUTH_PASS=your-strong-password-here

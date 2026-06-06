@@ -31,7 +31,7 @@ _SETTINGS_FILE = os.path.join(_INDEX_DIR, "settings.json")
 
 _PRUNE_PATHS_RAW = os.environ.get(
     "PRUNE_PATHS",
-    f"{_DATA_ROOT}/appdata {_DATA_ROOT}/system {_DATA_ROOT}/domains {_DATA_ROOT}/isos",
+    f"{_DATA_ROOT}/appdata {_DATA_ROOT}/system {_DATA_ROOT}/domains {_DATA_ROOT}/isos {_DATA_ROOT}/docker",
 )
 _PRUNE_PATHS: set[str] = {p.strip() for p in _PRUNE_PATHS_RAW.split() if p.strip()}
 _MAX_FILES_PER_DIR = int(os.environ.get("MAX_FILES_PER_DIR", "200"))
