@@ -209,11 +209,17 @@ def _scan_sync(root: str, prune: set[str], max_files: int) -> None:
         """)
         conn.execute("BEGIN")
 
-        def walk(path: str, parent: str | None) -> int:
+        def walk(path: str, parent: str | None, depth: int = 0) -> int:
             nonlocal nodes_seen
             name = os.path.basename(path) or path
             dirs: list[str] = []
             files: list[tuple[str, str, int]] = []
+
+            # Hard depth guard: no legitimate NAS hierarchy is 200 levels deep.
+            # This catches any circular path that slips past inode detection.
+            if depth > 200:
+                log.warning("Depth limit reached at %s — skipping subtree", path)
+                return 0
 
             # Detect cycles caused by bind mounts or hard-linked directories.
             # A bind mount exposes the same inode at a second path — its (dev, ino)
@@ -222,7 +228,7 @@ def _scan_sync(root: str, prune: set[str], max_files: int) -> None:
                 st = os.stat(path, follow_symlinks=False)
                 inode_key = (st.st_dev, st.st_ino)
                 if inode_key in visited_dirs:
-                    log.warning("Skipping already-visited inode at %s (bind mount?)", path)
+                    log.warning("Skipping already-visited inode at %s (bind mount/btrfs subvol?)", path)
                     return 0
                 visited_dirs.add(inode_key)
             except OSError:
@@ -257,7 +263,7 @@ def _scan_sync(root: str, prune: set[str], max_files: int) -> None:
             # Recurse first so child sizes are known before inserting this dir
             size = 0
             for d in dirs:
-                size += walk(d, path)
+                size += walk(d, path, depth + 1)
 
             # Keep top-N files by size; aggregate the rest into one leaf
             files.sort(key=lambda f: f[2], reverse=True)
@@ -287,6 +293,22 @@ def _scan_sync(root: str, prune: set[str], max_files: int) -> None:
         walk(root, None)
 
         conn.commit()
+
+        # Diagnostic: log total row count and top 20 largest nodes so that
+        # inflated sizes can be attributed to specific paths in the container log.
+        total_rows = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        root_size = conn.execute(
+            "SELECT size FROM nodes WHERE parent IS NULL LIMIT 1"
+        ).fetchone()
+        log.info("Scan rows: %d  root size: %s bytes",
+                 total_rows, root_size[0] if root_size else "unknown")
+        top20 = conn.execute(
+            "SELECT path, size, is_dir FROM nodes ORDER BY size DESC LIMIT 20"
+        ).fetchall()
+        log.info("Top 20 largest nodes after scan:")
+        for p, s, is_dir in top20:
+            log.info("  [%s] %s  =>  %d bytes", "dir" if is_dir else "file", p, s)
+
         # Build index after bulk insert — orders of magnitude faster than during
         conn.execute("CREATE INDEX idx_parent ON nodes(parent)")
         conn.commit()
